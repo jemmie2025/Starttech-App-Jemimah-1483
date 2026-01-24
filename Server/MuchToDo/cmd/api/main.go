@@ -53,6 +53,22 @@ func main() {
 		log.Fatalf("could not load config: %v", err)
 	}
 
+	// ADD THIS DEBUG - check actual environment variables:
+	fmt.Printf("=== ENV VARS DEBUG ===\n")
+	fmt.Printf("os.Getenv MONGO_URI: '%s'\n", os.Getenv("MONGO_URI"))
+	fmt.Printf("os.Getenv DB_NAME: '%s'\n", os.Getenv("DB_NAME"))
+	fmt.Printf("os.Getenv PORT: '%s'\n", os.Getenv("PORT"))
+	fmt.Printf("===================\n")
+
+	fmt.Printf("=== CONFIG DEBUG ===\n")
+	fmt.Printf("MONGO_URI: '%s'\n", cfg.MongoURI)
+	fmt.Printf("MONGO_URI length: %d\n", len(cfg.MongoURI))
+	if len(cfg.MongoURI) > 0 {
+		fmt.Printf("MONGO_URI first 10 chars: %q\n", cfg.MongoURI[:min(10, len(cfg.MongoURI))])
+	}
+	fmt.Printf("DB_NAME: '%s'\n", cfg.DBName)
+	fmt.Printf("==================\n")
+
 	// --- Logger ---
 	// This must be initialized before any other component that might log.
 	logger.InitLogger(cfg)
@@ -84,7 +100,6 @@ func main() {
 	// 5. Start Server with graceful shutdown
 	startServer(router, cfg.ServerPort)
 }
-
 // preloadUsernamesIntoCache queries for all usernames and loads them into the cache,
 // but only if caching is enabled and a sentinel key indicates the cache is empty.
 func preloadUsernamesIntoCache(db *mongo.Client, cacheSvc cache.Cache, cfg config.Config) {

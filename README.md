@@ -38,25 +38,38 @@ cd much-to-do
 ##  Docker Workflow
 
 docker build -t muchtodo-backend . (Build backend image)
+
 docker compose up -d --build (Start Services With Docker Compose)
+
 docker ps (Verify Containers)
+
 docker logs muchtodo-backend (View Backend Logs)
+
 
 ##  Kubernetes Workflow
 
  kind create cluster --name muchtodo (Create Kind Cluster)
+ 
  kubectl get nodes (Verify Cluster)
- kubectl apply -f kubernetes/ (Apply Kubernetes Manifests)
+ 
+ kubectl apply -f kubernetes/ (Apply Kubernetes Manifests
+ 
 
 ##  Kubernetes Verification Commands
 
 kubectl get all -n muchtodo (Get All Resources)
+
  kubectl get ns (Get Names)
+ 
  kubectl get pods -n muchtodo (Get Pods)
+ 
 
  kubectl get deployment -n muchtodo (Get Deployments)
+ 
  kubectl get svc -n muchtodo (Get Replicas)
+ 
  kubectl get ingress -n muchtodo (Get Ingress)
+ 
 
 
 ##  Accessing The Application

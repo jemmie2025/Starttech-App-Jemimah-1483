@@ -11,6 +11,7 @@ MuchToDo is a backend task-management application built with *Golang* and *Mongo
 This project demonstrates a *real-world DevOps workflow*, covering containerization, orchestration, health monitoring, and persistent storage.
 
 ##  Tech Stack
+
 	•	Language: Golang
 	•	Database: MongoDB
 	•	Containerization: Docker
@@ -20,6 +21,7 @@ This project demonstrates a *real-world DevOps workflow*, covering containerizat
 
 
  ##   Skills Demonstrated
+ 
 	•	Docker containerization
 	•	Docker Compose orchestration
 	•	Kubernetes deployment & scaling
@@ -29,12 +31,14 @@ This project demonstrates a *real-world DevOps workflow*, covering containerizat
 
 ##  Clone Forked Repository
 
+
 Clone *forked repository* from GitHub:
 
 
 git clone https://github.com/jemmie2025/much-to-do-.git
 
 cd much-to-do
+
 ##  Docker Workflow
 
 docker build -t muchtodo-backend . (Build backend image)
@@ -73,6 +77,7 @@ kubectl get all -n muchtodo (Get All Resources)
 
 
 ##  Accessing The Application
+
 The backend runs on port 3000 inside the cluster and is exposed via NodePort 30473.
 
  kubectl port-forward svc/backend 30473:3000 -n muchtodo (Port Forward Service)
@@ -87,7 +92,10 @@ curl http://localhost:30473/health -UseBasicParsing (Health Check Test PowerShel
 
 
 ##  Evidence Screenshots
+
+
 What each proves:
+
 	•	pods → workloads running
 	•	services → NodePort & ClusterIP
 	•	get all → full cluster state

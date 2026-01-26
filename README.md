@@ -32,7 +32,7 @@ This project demonstrates a *real-world DevOps workflow*, covering containerizat
 Clone *forked repository* from GitHub:
 
 
-git clone https://github.com/jemmie2025/much-to-do.git
+git clone https://github.com/jemmie2025/much-to-do-.git
 
 cd much-to-do
 ##  Docker Workflow

@@ -1,0 +1,22 @@
+# Development Dockerfile for backend
+FROM golang:1.25
+
+WORKDIR /app
+
+# Copy go mod files
+COPY backend/MuchToDo/go.mod backend/MuchToDo/go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY backend/MuchToDo/ .
+
+# Install swag for docs generation
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
+# Expose port
+EXPOSE 8080
+
+# Run the app
+CMD ["go", "run", "./cmd/api/main.go"]

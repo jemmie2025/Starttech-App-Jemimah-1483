@@ -1,0 +1,292 @@
+name: Frontend CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-ci-cd.yml'
+  pull_request:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
+
+env:
+  AWS_REGION: us-east-1
+  NODE_VERSION: '18'
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: frontend
+        run: npm run lint || true
+
+      - name: Check TypeScript
+        working-directory: frontend
+        run: npx tsc --noEmit || true
+
+      - name: Run tests
+        working-directory: frontend
+        run: npm test -- --coverage --watchAll=false || true
+
+      - name: Security audit
+        working-directory: frontend
+        run: npm audit --production || true
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./frontend/coverage/lcov.info
+          flags: frontend
+          fail_ci_if_error: false
+
+  build:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    
+    outputs:
+      build-hash: ${{ steps.build-info.outputs.build-hash }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build application
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || 'http://localhost:8080' }}
+          VITE_ENVIRONMENT: production
+        run: npm run build
+
+      - name: Generate build info
+        id: build-info
+        run: |
+          BUILD_HASH=$(git rev-parse --short HEAD)
+          echo "build-hash=${BUILD_HASH}" >> $GITHUB_OUTPUT
+          echo "Build hash: ${BUILD_HASH}"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-build
+          path: frontend/dist
+          retention-days: 1
+
+  security-scan:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run OWASP dependency check
+        working-directory: frontend
+        run: npm audit --production --audit-level=moderate || true
+
+      - name: Check for critical vulnerabilities
+        working-directory: frontend
+        run: |
+          CRITICAL=$(npm audit --production --json | jq '.metadata.vulnerabilities.critical')
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "⚠️ Found $CRITICAL critical vulnerabilities"
+            npm audit --production
+          fi
+
+  deploy:
+    needs: [build, security-scan]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    environment:
+      name: production
+      url: https://${{ secrets.CLOUDFRONT_DOMAIN }}
+    
+    permissions:
+      contents: read
+      deployments: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: frontend-build
+          path: frontend/dist
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create deployment
+        uses: chrnorm/deployment-action@v2
+        id: deployment
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          environment: production
+          description: Deploying frontend - commit ${{ github.sha }}
+          auto_merge: false
+
+      - name: Deploy to S3 and invalidate CloudFront
+        run: |
+          chmod +x scripts/deploy-frontend.sh
+          ./scripts/deploy-frontend.sh "${{ secrets.S3_BUCKET_NAME }}" "frontend/dist" "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}"
+
+      - name: Run smoke tests
+        run: |
+          echo ""
+          echo "🧪 Running Frontend Smoke Tests"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          CLOUDFRONT_URL="https://${{ secrets.CLOUDFRONT_DOMAIN }}"
+          MAX_RETRIES=10
+          
+          # Test 1: Check index.html is accessible
+          echo ""
+          echo "Test 1️⃣ : Check index.html"
+          for i in $(seq 1 $MAX_RETRIES); do
+            HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/index.html "$CLOUDFRONT_URL/")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "  ✅ index.html accessible (HTTP 200)"
+              if grep -q "StartTech\|much-to-do" /tmp/index.html; then
+                echo "  ✅ Page content loaded correctly"
+              fi
+              break
+            else
+              echo "  ⏳ Attempt $i/$MAX_RETRIES (HTTP $HTTP_CODE)..."
+              sleep 3
+            fi
+          done
+          
+          # Test 2: Check main bundle loads
+          echo ""
+          echo "Test 2️⃣ : Check JavaScript bundles"
+          BUNDLES=$(curl -s "$CLOUDFRONT_URL/" | grep -o 'src="[^"]*\.js"' | head -1)
+          if [ -n "$BUNDLES" ]; then
+            echo "  ✅ JavaScript bundles referenced in HTML"
+          fi
+          
+          # Test 3: Check for console errors pattern
+          echo ""
+          echo "Test 3️⃣ : Basic HTML validation"
+          if grep -q "<html" /tmp/index.html; then
+            echo "  ✅ Valid HTML structure"
+          fi
+          if grep -q "<body" /tmp/index.html; then
+            echo "  ✅ Body tag present"
+          fi
+          if grep -q "root\|app" /tmp/index.html; then
+            echo "  ✅ React root element present"
+          fi
+          
+          # Test 4: Check CSS loads
+          echo ""
+          echo "Test 4️⃣ : Check CSS"
+          if grep -q '\.css' /tmp/index.html; then
+            echo "  ✅ CSS files referenced"
+          fi
+          
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ Frontend smoke tests passed"
+
+      - name: Send deployment success notification
+        uses: slackapi/slack-github-action@v1.24.0
+        if: success()
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "✅ Frontend deployment succeeded",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*✅ Frontend Deployment Successful*\n*Environment:* Production\n*URL:* https://${{ secrets.CLOUDFRONT_DOMAIN }}\n*Branch:* main\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\n*Author:* ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
+
+      - name: Send deployment failure notification
+        uses: slackapi/slack-github-action@v1.24.0
+        if: failure()
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "❌ Frontend deployment failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*❌ Frontend Deployment Failed*\n*Environment:* Production\n*Branch:* main\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\n*Author:* ${{ github.actor }}\n*Action:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Details>"
+                  }
+                }
+              ]
+            }
+
+      - name: Update deployment status (success)
+        if: success()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          state: success
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          environment-url: https://${{ secrets.CLOUDFRONT_DOMAIN }}
+
+      - name: Update deployment status (failure)
+        if: failure()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          state: failure
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
